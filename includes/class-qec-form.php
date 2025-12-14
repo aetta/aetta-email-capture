@@ -3,6 +3,9 @@ if (!defined('ABSPATH')) exit;
 
 class QEC_Form
 {
+    const COOKIE_THANKS = 'qec_thanks';
+    const COOKIE_ERR = 'qec_err';
+
     public static function init()
     {
         add_shortcode('quick_email_capture', [__CLASS__, 'shortcode']);
@@ -14,22 +17,25 @@ class QEC_Form
     {
         $opts = QEC_Plugin::opts();
 
-        $redirect_to = isset($_POST['qec_redirect_to'])
-            ? esc_url_raw(wp_unslash($_POST['qec_redirect_to']))
-            : home_url('/');
+        $redirect_to = wp_get_referer();
+        if (!$redirect_to) $redirect_to = home_url('/');
 
-        if ($redirect_to === '') $redirect_to = home_url('/');
-
-        $err = self::handle_submit($opts);
-
-        $url = remove_query_arg(['qec_thanks', 'qec_err'], $redirect_to);
-
-        if ($err === '') {
-            wp_safe_redirect(add_query_arg('qec_thanks', '1', $url));
+        $nonce = isset($_POST['qec_nonce']) ? sanitize_text_field(wp_unslash($_POST['qec_nonce'])) : '';
+        if (!wp_verify_nonce($nonce, 'qec_submit')) {
+            self::set_cookie(self::COOKIE_ERR, $opts['error_invalid']);
+            wp_safe_redirect(remove_query_arg([self::COOKIE_THANKS, self::COOKIE_ERR], $redirect_to));
             exit;
         }
 
-        wp_safe_redirect(add_query_arg('qec_err', rawurlencode($err), $url));
+        $err = self::handle_submit($opts);
+
+        if ($err === '') {
+            self::set_cookie(self::COOKIE_THANKS, '1');
+        } else {
+            self::set_cookie(self::COOKIE_ERR, $err);
+        }
+
+        wp_safe_redirect(remove_query_arg([self::COOKIE_THANKS, self::COOKIE_ERR], $redirect_to));
         exit;
     }
 
@@ -41,9 +47,11 @@ class QEC_Form
             wp_enqueue_style('qec-form', QEC_PLUGIN_URL . 'assets/css/form.css', [], QEC_VERSION);
         }
 
-        $thanks = (isset($_GET['qec_thanks']) && $_GET['qec_thanks'] === '1');
-        $err = '';
-        if (isset($_GET['qec_err'])) $err = sanitize_text_field(wp_unslash($_GET['qec_err']));
+        $thanks = (self::get_cookie(self::COOKIE_THANKS) === '1');
+        $err = self::get_cookie(self::COOKIE_ERR);
+
+        if ($thanks) self::clear_cookie(self::COOKIE_THANKS);
+        if ($err !== '') self::clear_cookie(self::COOKIE_ERR);
 
         $wrapper_extra = trim((string)$opts['wrapper_class']);
         $input_extra = trim((string)$opts['input_class']);
@@ -72,13 +80,11 @@ class QEC_Form
         }
 
         $action = esc_url(admin_url('admin-post.php'));
-        $redirect_to = wp_get_referer() ?: self::current_url();
 
         $html .= '<form class="qec-form' . ($wrapper_extra ? ' ' . esc_attr($wrapper_extra) : '') . '" method="post" action="' . $action . '" novalidate style="' . esc_attr($style_attr) . '">';
         $html .= wp_nonce_field('qec_submit', 'qec_nonce', true, false);
 
         $html .= '<input type="hidden" name="action" value="qec_submit">';
-        $html .= '<input type="hidden" name="qec_redirect_to" value="' . esc_attr($redirect_to) . '">';
 
         $html .= '<label for="qec_name">' . esc_html($opts['name_label']) . '</label>';
         $html .= '<input class="' . esc_attr($input_extra) . '" id="qec_name" name="qec_name" type="text" autocomplete="name" maxlength="150" required aria-required="true" placeholder="' . esc_attr($opts['name_placeholder']) . '">';
@@ -112,16 +118,17 @@ class QEC_Form
         $nonce = isset($_POST['qec_nonce']) ? sanitize_text_field(wp_unslash($_POST['qec_nonce'])) : '';
         if (!wp_verify_nonce($nonce, 'qec_submit')) return $opts['error_invalid'];
 
-        $hp = isset($_POST['qec_hp']) ? trim((string)wp_unslash($_POST['qec_hp'])) : '';
+        $hp = isset($_POST['qec_hp']) ? sanitize_text_field(wp_unslash($_POST['qec_hp'])) : '';
         if ($hp !== '') return $opts['error_invalid'];
 
-        $ts = isset($_POST['qec_ts']) ? (int)wp_unslash($_POST['qec_ts']) : 0;
+        $ts = isset($_POST['qec_ts']) ? absint(wp_unslash($_POST['qec_ts'])) : 0;
         $min = max(0, (int)$opts['min_submit_seconds']);
         if ($min > 0 && (time() - $ts) < $min) return $opts['error_wait'];
 
         $name = isset($_POST['qec_name']) ? sanitize_text_field(wp_unslash($_POST['qec_name'])) : '';
         $email = isset($_POST['qec_email']) ? sanitize_email(wp_unslash($_POST['qec_email'])) : '';
-        $consent = (isset($_POST['qec_consent']) && wp_unslash($_POST['qec_consent']) === '1');
+        $consent_raw = isset($_POST['qec_consent']) ? sanitize_text_field(wp_unslash($_POST['qec_consent'])) : '';
+        $consent = ($consent_raw === '1');
 
         if ($name === '' || !is_email($email)) return $opts['error_required'];
         if ((int)$opts['consent_required'] === 1 && !$consent) return $opts['error_consent'];
@@ -134,16 +141,7 @@ class QEC_Form
             set_transient($rate_key, 1, $rate_seconds);
         }
 
-        $existing = get_posts([
-            'post_type' => QEC_CPT::POST_TYPE,
-            'post_status' => 'any',
-            'meta_key' => '_qec_email',
-            'meta_value' => $email,
-            'fields' => 'ids',
-            'posts_per_page' => 1,
-        ]);
-
-        if ($existing) return '';
+        if (self::email_exists($email)) return '';
 
         $now_gmt = current_time('mysql', true);
 
@@ -168,17 +166,46 @@ class QEC_Form
 
         if ((int)$opts['store_ip'] === 1) update_post_meta($pid, '_qec_ip', $ip);
 
-        if ((int)$opts['store_user_agent'] === 1 && !empty($_SERVER['HTTP_USER_AGENT'])) {
-            $ua = sanitize_text_field(substr((string)wp_unslash($_SERVER['HTTP_USER_AGENT']), 0, 255));
-            update_post_meta($pid, '_qec_ua', $ua);
+        if ((int)$opts['store_user_agent'] === 1) {
+            $ua = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+            if ($ua !== '') update_post_meta($pid, '_qec_ua', substr($ua, 0, 255));
         }
 
         return '';
     }
 
+    private static function email_exists($email)
+    {
+        global $wpdb;
+
+        $cache_key = 'qec_email_exists_' . md5((string)$email);
+        $cached = wp_cache_get($cache_key, 'qec');
+        if ($cached !== false) return (bool)$cached;
+
+        $found = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT 1
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} pm
+                    ON pm.post_id = p.ID
+                    AND pm.meta_key = %s
+                    AND pm.meta_value = %s
+                 WHERE p.post_type = %s
+                 LIMIT 1",
+                '_qec_email',
+                $email,
+                QEC_CPT::POST_TYPE
+            )
+        );
+
+        $exists = !empty($found);
+        wp_cache_set($cache_key, $exists ? 1 : 0, 'qec', 300);
+        return $exists;
+    }
+
     private static function current_url()
     {
-        $uri = isset($_SERVER['REQUEST_URI']) ? (string)wp_unslash($_SERVER['REQUEST_URI']) : '/';
+        $uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
         $uri = preg_replace('/[\r\n]/', '', $uri);
         $uri = '/' . ltrim($uri, '/');
         return esc_url_raw(home_url($uri));
@@ -186,7 +213,42 @@ class QEC_Form
 
     private static function ip()
     {
-        $ip = !empty($_SERVER['REMOTE_ADDR']) ? (string)wp_unslash($_SERVER['REMOTE_ADDR']) : '';
-        return sanitize_text_field($ip);
+        $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
+        return $ip;
+    }
+
+    private static function set_cookie($name, $value)
+    {
+        $value = sanitize_text_field((string)$value);
+        $secure = is_ssl();
+        $path = defined('COOKIEPATH') ? COOKIEPATH : '/';
+        setcookie($name, $value, [
+            'expires' => time() + 120,
+            'path' => $path,
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+        $_COOKIE[$name] = $value;
+    }
+
+    private static function get_cookie($name)
+    {
+        if (!isset($_COOKIE[$name])) return '';
+        return sanitize_text_field(wp_unslash($_COOKIE[$name]));
+    }
+
+    private static function clear_cookie($name)
+    {
+        $secure = is_ssl();
+        $path = defined('COOKIEPATH') ? COOKIEPATH : '/';
+        setcookie($name, '', [
+            'expires' => time() - 3600,
+            'path' => $path,
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+        unset($_COOKIE[$name]);
     }
 }

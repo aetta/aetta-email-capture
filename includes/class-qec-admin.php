@@ -280,8 +280,7 @@ class QEC_Admin
         $counts = wp_count_posts(QEC_CPT::POST_TYPE);
 
         echo '<div class="wrap"><h1>' . esc_html__('Maintenance', 'quick-email-capture') . '</h1>';
-        /* translators: %d: number of retention days */
-        echo '<p>' . sprintf(esc_html__('Purges signups older than %d days.', 'quick-email-capture'), (int)$o['retention_days']) . '</p>';
+        echo '<p>' . esc_html__('Purges signups older than', 'quick-email-capture') . ' ' . (int)$o['retention_days'] . ' ' . esc_html__('days.', 'quick-email-capture') . '</p>';
         echo '<p><strong>' . esc_html__('Totals', 'quick-email-capture') . '</strong> — ' . esc_html__('Private', 'quick-email-capture') . ': ' . (int)($counts->private ?? 0) . '</p>';
 
         echo '<form method="post">';
@@ -310,26 +309,79 @@ class QEC_Admin
         return $exporters;
     }
 
+    private static function signup_ids_by_email($email_address, $page, $per_page, &$max_pages)
+    {
+        global $wpdb;
+
+        $page = max(1, (int)$page);
+        $per_page = max(1, (int)$per_page);
+        $offset = ($page - 1) * $per_page;
+
+        $cache_key = 'qec_email_ids_' . md5((string)$email_address . '|' . $page . '|' . $per_page);
+        $cached = wp_cache_get($cache_key, 'qec');
+        if (is_array($cached) && isset($cached['ids'], $cached['max_pages'])) {
+            $max_pages = (int)$cached['max_pages'];
+            return array_map('intval', (array)$cached['ids']);
+        }
+
+        $total = (int)$wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(1)
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} pm
+                    ON pm.post_id = p.ID
+                    AND pm.meta_key = %s
+                    AND pm.meta_value = %s
+                 WHERE p.post_type = %s",
+                '_qec_email',
+                $email_address,
+                QEC_CPT::POST_TYPE
+            )
+        );
+
+        $max_pages = ($total > 0) ? (int)ceil($total / $per_page) : 0;
+
+        $ids = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT p.ID
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} pm
+                    ON pm.post_id = p.ID
+                    AND pm.meta_key = %s
+                    AND pm.meta_value = %s
+                 WHERE p.post_type = %s
+                 ORDER BY p.ID ASC
+                 LIMIT %d OFFSET %d",
+                '_qec_email',
+                $email_address,
+                QEC_CPT::POST_TYPE,
+                $per_page,
+                $offset
+            )
+        );
+
+        $payload = [
+            'ids' => array_map('intval', (array)$ids),
+            'max_pages' => (int)$max_pages,
+        ];
+
+        wp_cache_set($cache_key, $payload, 'qec', 300);
+
+        return $payload['ids'];
+    }
+
     public static function exporter_callback($email_address, $page = 1)
     {
         $page = max(1, (int)$page);
         $per_page = 50;
 
-        $q = new WP_Query([
-            'post_type' => QEC_CPT::POST_TYPE,
-            'post_status' => 'any',
-            'posts_per_page' => $per_page,
-            'paged' => $page,
-            'meta_query' => [[
-                'key' => '_qec_email',
-                'value' => $email_address,
-                'compare' => '=',
-            ]],
-            'fields' => 'ids',
-        ]);
+        $max_pages = 0;
+        $ids = self::signup_ids_by_email($email_address, $page, $per_page, $max_pages);
 
         $data = [];
-        foreach ($q->posts as $pid) {
+        foreach ($ids as $pid) {
+            $pid = (int)$pid;
+
             $item = [
                 ['name' => 'name', 'value' => (string)get_post_meta($pid, '_qec_name', true)],
                 ['name' => 'email', 'value' => (string)get_post_meta($pid, '_qec_email', true)],
@@ -349,7 +401,7 @@ class QEC_Admin
             ];
         }
 
-        $done = ($q->max_num_pages <= $page);
+        $done = ($max_pages === 0 || $page >= $max_pages);
 
         return [
             'data' => $data,
@@ -371,26 +423,16 @@ class QEC_Admin
         $page = max(1, (int)$page);
         $per_page = 50;
 
-        $q = new WP_Query([
-            'post_type' => QEC_CPT::POST_TYPE,
-            'post_status' => 'any',
-            'posts_per_page' => $per_page,
-            'paged' => $page,
-            'meta_query' => [[
-                'key' => '_qec_email',
-                'value' => $email_address,
-                'compare' => '=',
-            ]],
-            'fields' => 'ids',
-        ]);
+        $max_pages = 0;
+        $ids = self::signup_ids_by_email($email_address, $page, $per_page, $max_pages);
 
         $removed = false;
-        foreach ($q->posts as $pid) {
-            wp_delete_post($pid, true);
+        foreach ($ids as $pid) {
+            wp_delete_post((int)$pid, true);
             $removed = true;
         }
 
-        $done = ($q->max_num_pages <= $page);
+        $done = ($max_pages === 0 || $page >= $max_pages);
 
         return [
             'items_removed' => $removed,
