@@ -1,10 +1,9 @@
 === Aetta Email Capture ===
-Contributors: aetta
 Tags: email capture, newsletter, opt-in, lead capture, lightweight
 Requires at least: 6.0
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -105,10 +104,17 @@ Yes. It uses standard HTML and works with any WordPress theme.
 
 == Changelog ==
 
+= 1.0.2 =
+* Tested with WordPress 7.0.
+* Updated plugin metadata for the current release.
+
 = 1.0.1 =
 * Initial public release
 
 == Upgrade Notice ==
+
+= 1.0.2 =
+Compatibility release tested with WordPress 7.0.
 
 = 1.0.1 =
 Initial release.
