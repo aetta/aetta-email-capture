@@ -3,7 +3,7 @@ Tags: email capture, newsletter, opt-in, lead capture, lightweight
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.2
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -104,6 +104,13 @@ Yes. It uses standard HTML and works with any WordPress theme.
 
 == Changelog ==
 
+= 1.1.0 =
+* Forms now submit asynchronously (AJAX) without reloading the page, with a no-JavaScript fallback.
+* Signups now store submission date, source page URL and referrer.
+* New opt-in setting to store IP address and User-Agent (off by default).
+* New theme controls: form background, text color, input background, button hover color, font size, max width and an inline layout option.
+* Settings page now uses the WordPress color picker and includes field descriptions.
+
 = 1.0.2 =
 * Tested with WordPress 7.0.
 * Updated plugin metadata for the current release.
@@ -112,6 +119,9 @@ Yes. It uses standard HTML and works with any WordPress theme.
 * Initial public release
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+AJAX submission, full field capture (date, source, optional IP/UA) and richer styling controls.
 
 = 1.0.2 =
 Compatibility release tested with WordPress 7.0.

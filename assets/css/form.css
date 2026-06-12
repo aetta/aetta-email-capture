@@ -4,27 +4,38 @@
   --aettaec-radius: 12px;
   --aettaec-button-bg: #1d2327;
   --aettaec-button-text: #ffffff;
+  --aettaec-button-hover-bg: #3c434a;
   --aettaec-success-border: #00a32a;
   --aettaec-error-border: #d63638;
   --aettaec-input-height: 44px;
+  --aettaec-form-bg: #ffffff;
+  --aettaec-text-color: #1d2327;
+  --aettaec-input-bg: #ffffff;
+  --aettaec-font-size: 14px;
+  --aettaec-max-width: 420px;
 
   width: 100%;
-  max-width: 420px;
+  max-width: var(--aettaec-max-width);
   margin: 0 auto;
   padding: 18px;
   border: var(--aettaec-border-width) solid var(--aettaec-border-color);
   border-radius: var(--aettaec-radius);
-  background: #fff;
-  color: #1d2327;
+  background: var(--aettaec-form-bg);
+  color: var(--aettaec-text-color);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: var(--aettaec-font-size);
   box-sizing: border-box;
 }
 
 .aettaec-form label {
   display: block;
-  font-size: 14px;
+  font-size: var(--aettaec-font-size);
   margin-bottom: 6px;
   font-weight: 600;
+}
+
+.aettaec-field {
+  margin-bottom: 12px;
 }
 
 .aettaec-form input[type="text"],
@@ -32,10 +43,11 @@
   width: 100%;
   height: var(--aettaec-input-height);
   padding: 10px;
-  margin-bottom: 12px;
   border: var(--aettaec-border-width) solid var(--aettaec-border-color);
   border-radius: calc(var(--aettaec-radius) - 2px);
-  font-size: 14px;
+  background: var(--aettaec-input-bg);
+  color: var(--aettaec-text-color);
+  font-size: var(--aettaec-font-size);
   box-sizing: border-box;
 }
 
@@ -60,19 +72,57 @@
   color: var(--aettaec-button-text);
   border-radius: calc(var(--aettaec-radius) - 2px);
   cursor: pointer;
-  font-size: 15px;
+  font-size: calc(var(--aettaec-font-size) + 1px);
   font-weight: 700;
-  transition: opacity 0.2s ease;
+  transition: background 0.2s ease, opacity 0.2s ease;
 }
 
 .aettaec-form button:hover {
-  opacity: 0.9;
+  background: var(--aettaec-button-hover-bg);
 }
 
 .aettaec-form button:focus,
 .aettaec-form input:focus {
   outline: 3px solid currentColor;
   outline-offset: 2px;
+}
+
+.aettaec-form.aettaec-busy button {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Inline layout: fields and button share one row, consent goes below. */
+.aettaec-form.aettaec-layout-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.aettaec-layout-inline .aettaec-fields {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.aettaec-layout-inline .aettaec-field {
+  flex: 1 1 140px;
+  margin-bottom: 0;
+}
+
+.aettaec-layout-inline .aettaec-consent {
+  flex-basis: 100%;
+  order: 3;
+  margin: 0;
+}
+
+.aettaec-layout-inline button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 18px;
+  height: var(--aettaec-input-height);
 }
 
 .aettaec-hp {
@@ -85,21 +135,28 @@
 }
 
 .aettaec-msg {
-  max-width: 420px;
+  max-width: var(--aettaec-max-width, 420px);
   margin: 0 auto 12px auto;
   padding: 12px;
-  border-radius: calc(var(--aettaec-radius) - 2px);
+  border-radius: calc(var(--aettaec-radius, 12px) - 2px);
   box-sizing: border-box;
 }
 
+.aettaec-form .aettaec-msg {
+  flex-basis: 100%;
+  width: 100%;
+  max-width: none;
+  margin: 0 0 12px 0;
+}
+
 .aettaec-success {
-  border: var(--aettaec-border-width) solid var(--aettaec-success-border);
+  border: var(--aettaec-border-width, 1px) solid var(--aettaec-success-border, #00a32a);
   background-color: #f0f9f1;
   color: #1e4620;
 }
 
 .aettaec-error {
-  border: var(--aettaec-border-width) solid var(--aettaec-error-border);
+  border: var(--aettaec-border-width, 1px) solid var(--aettaec-error-border, #d63638);
   background-color: #fcf0f0;
   color: #6a1a1a;
 }

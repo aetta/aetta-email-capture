@@ -10,6 +10,7 @@ class AETTAEC_Admin
         add_action('manage_' . AETTAEC_CPT::POST_TYPE . '_posts_custom_column', [__CLASS__, 'render_signup_column_content'], 10, 2);
         add_action('admin_menu', [__CLASS__, 'register_admin_menu_pages']);
         add_action('admin_init', [__CLASS__, 'register_plugin_settings']);
+        add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_settings_assets']);
         add_action('admin_init', [__CLASS__, 'add_privacy_policy_information']);
         add_action('admin_post_aettaec_export_csv', [__CLASS__, 'process_csv_export']);
         add_filter('wp_privacy_personal_data_exporters', [__CLASS__, 'register_privacy_exporter']);
@@ -66,7 +67,11 @@ class AETTAEC_Admin
     public static function render_signup_column_content($column_name, $post_id)
     {
         if ($column_name === 'aettaec_name') echo esc_html(get_post_meta($post_id, '_aettaec_name', true));
-        if ($column_name === 'aettaec_created') echo esc_html(get_post_meta($post_id, '_aettaec_created_gmt', true));
+        if ($column_name === 'aettaec_created') {
+            $created_at = get_post_meta($post_id, '_aettaec_created_gmt', true);
+            if ($created_at === '') $created_at = get_post_field('post_date_gmt', $post_id);
+            echo esc_html($created_at);
+        }
         if ($column_name === 'aettaec_source') echo esc_html(get_post_meta($post_id, '_aettaec_source_url', true));
         if ($column_name === 'aettaec_consent') echo (get_post_meta($post_id, '_aettaec_consent', true) ? esc_html__('Yes', 'aetta-email-capture') : esc_html__('No', 'aetta-email-capture'));
     }
@@ -78,6 +83,15 @@ class AETTAEC_Admin
         add_submenu_page($base_slug, __('Settings', 'aetta-email-capture'), __('Settings', 'aetta-email-capture'), 'manage_options', 'aettaec-settings', [__CLASS__, 'render_settings_page']);
         add_submenu_page($base_slug, __('Export CSV', 'aetta-email-capture'), __('Export CSV', 'aetta-email-capture'), 'manage_options', 'aettaec-export', [__CLASS__, 'render_export_page']);
         add_submenu_page($base_slug, __('Maintenance', 'aetta-email-capture'), __('Maintenance', 'aetta-email-capture'), 'manage_options', 'aettaec-maintenance', [__CLASS__, 'render_maintenance_page']);
+    }
+
+    public static function enqueue_settings_assets($hook_suffix)
+    {
+        if (strpos((string)$hook_suffix, 'aettaec-settings') === false) return;
+
+        wp_enqueue_style('wp-color-picker');
+        wp_enqueue_script('wp-color-picker');
+        wp_add_inline_script('wp-color-picker', 'jQuery(function($){$(".aettaec-color").wpColorPicker();});');
     }
 
     public static function register_plugin_settings()
@@ -105,6 +119,7 @@ class AETTAEC_Admin
         $current_options['min_submit_seconds'] = max(0, (int)($input['min_submit_seconds'] ?? $current_options['min_submit_seconds']));
         $current_options['consent_required'] = !empty($input['consent_required']) ? 1 : 0;
         $current_options['use_css'] = !empty($input['use_css']) ? 1 : 0;
+        $current_options['store_ip_ua'] = !empty($input['store_ip_ua']) ? 1 : 0;
 
         $current_options['consent_label'] = sanitize_text_field($input['consent_label'] ?? $current_options['consent_label']);
         $current_options['success_message'] = sanitize_text_field($input['success_message'] ?? $current_options['success_message']);
@@ -119,17 +134,46 @@ class AETTAEC_Admin
         $current_options['name_placeholder'] = sanitize_text_field($input['name_placeholder'] ?? $current_options['name_placeholder']);
         $current_options['email_placeholder'] = sanitize_text_field($input['email_placeholder'] ?? $current_options['email_placeholder']);
 
-        $current_options['ui_border_color'] = self::validate_hex_color($input['ui_border_color'] ?? $current_options['ui_border_color'], $current_options['ui_border_color']);
-        $current_options['ui_button_bg'] = self::validate_hex_color($input['ui_button_bg'] ?? $current_options['ui_button_bg'], $current_options['ui_button_bg']);
-        $current_options['ui_button_text'] = self::validate_hex_color($input['ui_button_text'] ?? $current_options['ui_button_text'], $current_options['ui_button_text']);
-        $current_options['ui_success_border'] = self::validate_hex_color($input['ui_success_border'] ?? $current_options['ui_success_border'], $current_options['ui_success_border']);
-        $current_options['ui_error_border'] = self::validate_hex_color($input['ui_error_border'] ?? $current_options['ui_error_border'], $current_options['ui_error_border']);
+        foreach (['ui_border_color', 'ui_button_bg', 'ui_button_text', 'ui_button_hover_bg', 'ui_success_border', 'ui_error_border', 'ui_form_bg', 'ui_text_color', 'ui_input_bg'] as $color_key) {
+            $current_options[$color_key] = self::validate_hex_color($input[$color_key] ?? $current_options[$color_key], $current_options[$color_key]);
+        }
 
         $current_options['ui_border_width'] = min(10, max(0, (int)($input['ui_border_width'] ?? $current_options['ui_border_width'])));
         $current_options['ui_radius'] = min(60, max(0, (int)($input['ui_radius'] ?? $current_options['ui_radius'])));
         $current_options['ui_input_height'] = min(80, max(30, (int)($input['ui_input_height'] ?? $current_options['ui_input_height'])));
+        $current_options['ui_font_size'] = min(24, max(10, (int)($input['ui_font_size'] ?? $current_options['ui_font_size'])));
+        $current_options['ui_max_width'] = min(1200, max(240, (int)($input['ui_max_width'] ?? $current_options['ui_max_width'])));
+        $current_options['ui_layout'] = in_array($input['ui_layout'] ?? '', ['stacked', 'inline'], true) ? $input['ui_layout'] : $current_options['ui_layout'];
 
         return $current_options;
+    }
+
+    private static function render_text_row($options, $key, $label, $description = '')
+    {
+        echo '<tr><th>' . esc_html($label) . '</th><td><input type="text" class="regular-text" name="aettaec_options[' . esc_attr($key) . ']" value="' . esc_attr($options[$key]) . '">';
+        if ($description !== '') echo '<p class="description">' . esc_html($description) . '</p>';
+        echo '</td></tr>';
+    }
+
+    private static function render_color_row($options, $key, $label, $description = '')
+    {
+        echo '<tr><th>' . esc_html($label) . '</th><td><input type="text" class="aettaec-color" name="aettaec_options[' . esc_attr($key) . ']" value="' . esc_attr($options[$key]) . '">';
+        if ($description !== '') echo '<p class="description">' . esc_html($description) . '</p>';
+        echo '</td></tr>';
+    }
+
+    private static function render_number_row($options, $key, $label, $min, $max, $description = '')
+    {
+        echo '<tr><th>' . esc_html($label) . '</th><td><input type="number" min="' . esc_attr($min) . '" max="' . esc_attr($max) . '" name="aettaec_options[' . esc_attr($key) . ']" value="' . esc_attr($options[$key]) . '">';
+        if ($description !== '') echo '<p class="description">' . esc_html($description) . '</p>';
+        echo '</td></tr>';
+    }
+
+    private static function render_checkbox_row($options, $key, $label, $description = '')
+    {
+        echo '<tr><th>' . esc_html($label) . '</th><td><label><input type="checkbox" name="aettaec_options[' . esc_attr($key) . ']" value="1" ' . checked(1, (int)$options[$key], false) . '> ' . esc_html__('Enabled', 'aetta-email-capture') . '</label>';
+        if ($description !== '') echo '<p class="description">' . esc_html($description) . '</p>';
+        echo '</td></tr>';
     }
 
     public static function render_settings_page()
@@ -137,43 +181,54 @@ class AETTAEC_Admin
         if (!current_user_can('manage_options')) wp_die(esc_html__('Unauthorized', 'aetta-email-capture'));
         $options = AETTAEC_Plugin::get_plugin_options();
 
-        echo '<div class="wrap"><h1>' . esc_html__('Aetta Email Capture — Settings', 'aetta-email-capture') . '</h1>';
+        echo '<div class="wrap"><h1>' . esc_html__('Aetta Email Capture - Settings', 'aetta-email-capture') . '</h1>';
         echo '<form method="post" action="options.php">';
         settings_fields('aettaec_settings');
 
         echo '<h2>' . esc_html__('Behavior', 'aetta-email-capture') . '</h2>';
         echo '<table class="form-table">';
-        echo '<tr><th>' . esc_html__('Retention days', 'aetta-email-capture') . '</th><td><input type="number" min="1" name="aettaec_options[retention_days]" value="' . esc_attr($options['retention_days']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Minimum submit time (seconds)', 'aetta-email-capture') . '</th><td><input type="number" min="0" name="aettaec_options[min_submit_seconds]" value="' . esc_attr($options['min_submit_seconds']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Consent required', 'aetta-email-capture') . '</th><td><label><input type="checkbox" name="aettaec_options[consent_required]" value="1" ' . checked(1, (int)$options['consent_required'], false) . '> ' . esc_html__('Enabled', 'aetta-email-capture') . '</label></td></tr>';
+        self::render_number_row($options, 'retention_days', __('Retention days', 'aetta-email-capture'), 1, 36500, __('Signups older than this are deleted by the daily purge.', 'aetta-email-capture'));
+        self::render_number_row($options, 'min_submit_seconds', __('Minimum submit time (seconds)', 'aetta-email-capture'), 0, 600, __('Submissions faster than this are treated as bots.', 'aetta-email-capture'));
+        self::render_checkbox_row($options, 'consent_required', __('Consent required', 'aetta-email-capture'), __('Show a consent checkbox and require it before subscribing.', 'aetta-email-capture'));
+        self::render_checkbox_row($options, 'store_ip_ua', __('Store IP address and user agent', 'aetta-email-capture'), __('Off by default. Only enable if your privacy policy covers it (GDPR/LGPD).', 'aetta-email-capture'));
         echo '</table>';
 
         echo '<h2>' . esc_html__('Text', 'aetta-email-capture') . '</h2>';
         echo '<table class="form-table">';
-        echo '<tr><th>' . esc_html__('Consent label', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[consent_label]" value="' . esc_attr($options['consent_label']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Success message', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[success_message]" value="' . esc_attr($options['success_message']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Button label', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[button_label]" value="' . esc_attr($options['button_label']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Name label', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[name_label]" value="' . esc_attr($options['name_label']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Email label', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[email_label]" value="' . esc_attr($options['email_label']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Name placeholder', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[name_placeholder]" value="' . esc_attr($options['name_placeholder']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Email placeholder', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[email_placeholder]" value="' . esc_attr($options['email_placeholder']) . '"></td></tr>';
+        self::render_text_row($options, 'consent_label', __('Consent label', 'aetta-email-capture'));
+        self::render_text_row($options, 'success_message', __('Success message', 'aetta-email-capture'));
+        self::render_text_row($options, 'button_label', __('Button label', 'aetta-email-capture'));
+        self::render_text_row($options, 'name_label', __('Name label', 'aetta-email-capture'));
+        self::render_text_row($options, 'email_label', __('Email label', 'aetta-email-capture'));
+        self::render_text_row($options, 'name_placeholder', __('Name placeholder', 'aetta-email-capture'));
+        self::render_text_row($options, 'email_placeholder', __('Email placeholder', 'aetta-email-capture'));
         echo '</table>';
 
-        echo '<h2>' . esc_html__('Styling', 'aetta-email-capture') . '</h2>';
+        echo '<h2>' . esc_html__('Layout', 'aetta-email-capture') . '</h2>';
         echo '<table class="form-table">';
-        echo '<tr><th>' . esc_html__('Use built-in CSS', 'aetta-email-capture') . '</th><td><label><input type="checkbox" name="aettaec_options[use_css]" value="1" ' . checked(1, (int)$options['use_css'], false) . '> ' . esc_html__('Enabled', 'aetta-email-capture') . '</label></td></tr>';
+        self::render_checkbox_row($options, 'use_css', __('Use built-in CSS', 'aetta-email-capture'), __('Disable to style the form entirely from your theme.', 'aetta-email-capture'));
+        echo '<tr><th>' . esc_html__('Form layout', 'aetta-email-capture') . '</th><td><select name="aettaec_options[ui_layout]">';
+        echo '<option value="stacked" ' . selected('stacked', $options['ui_layout'], false) . '>' . esc_html__('Stacked (fields one per row)', 'aetta-email-capture') . '</option>';
+        echo '<option value="inline" ' . selected('inline', $options['ui_layout'], false) . '>' . esc_html__('Inline (fields and button side by side)', 'aetta-email-capture') . '</option>';
+        echo '</select></td></tr>';
+        self::render_number_row($options, 'ui_max_width', __('Form max width (px)', 'aetta-email-capture'), 240, 1200);
+        self::render_number_row($options, 'ui_font_size', __('Font size (px)', 'aetta-email-capture'), 10, 24);
+        self::render_number_row($options, 'ui_border_width', __('Border width (px)', 'aetta-email-capture'), 0, 10);
+        self::render_number_row($options, 'ui_radius', __('Corner radius (px)', 'aetta-email-capture'), 0, 60);
+        self::render_number_row($options, 'ui_input_height', __('Input height (px)', 'aetta-email-capture'), 30, 80);
         echo '</table>';
 
-        echo '<h2>' . esc_html__('Theme Controls', 'aetta-email-capture') . '</h2>';
+        echo '<h2>' . esc_html__('Colors', 'aetta-email-capture') . '</h2>';
         echo '<table class="form-table">';
-        echo '<tr><th>' . esc_html__('Border color', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[ui_border_color]" value="' . esc_attr($options['ui_border_color']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Border width (px)', 'aetta-email-capture') . '</th><td><input type="number" min="0" max="10" name="aettaec_options[ui_border_width]" value="' . esc_attr($options['ui_border_width']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Radius (px)', 'aetta-email-capture') . '</th><td><input type="number" min="0" max="60" name="aettaec_options[ui_radius]" value="' . esc_attr($options['ui_radius']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Input height (px)', 'aetta-email-capture') . '</th><td><input type="number" min="30" max="80" name="aettaec_options[ui_input_height]" value="' . esc_attr($options['ui_input_height']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Button background', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[ui_button_bg]" value="' . esc_attr($options['ui_button_bg']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Button text color', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[ui_button_text]" value="' . esc_attr($options['ui_button_text']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Success border color', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[ui_success_border]" value="' . esc_attr($options['ui_success_border']) . '"></td></tr>';
-        echo '<tr><th>' . esc_html__('Error border color', 'aetta-email-capture') . '</th><td><input type="text" class="regular-text" name="aettaec_options[ui_error_border]" value="' . esc_attr($options['ui_error_border']) . '"></td></tr>';
+        self::render_color_row($options, 'ui_form_bg', __('Form background', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_text_color', __('Text color', 'aetta-email-capture'), __('Used for labels and field text.', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_border_color', __('Border color', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_input_bg', __('Input background', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_button_bg', __('Button background', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_button_hover_bg', __('Button background (hover)', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_button_text', __('Button text color', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_success_border', __('Success border color', 'aetta-email-capture'));
+        self::render_color_row($options, 'ui_error_border', __('Error border color', 'aetta-email-capture'));
         echo '</table>';
 
         submit_button();
@@ -241,7 +296,7 @@ class AETTAEC_Admin
 
         echo '<div class="wrap"><h1>' . esc_html__('Maintenance', 'aetta-email-capture') . '</h1>';
         echo '<p>' . esc_html__('Purges signups older than', 'aetta-email-capture') . ' ' . (int)$options['retention_days'] . ' ' . esc_html__('days.', 'aetta-email-capture') . '</p>';
-        echo '<p><strong>' . esc_html__('Totals', 'aetta-email-capture') . '</strong> — ' . esc_html__('Private', 'aetta-email-capture') . ': ' . (int)($entry_counts->private ?? 0) . '</p>';
+        echo '<p><strong>' . esc_html__('Totals', 'aetta-email-capture') . '</strong> - ' . esc_html__('Private', 'aetta-email-capture') . ': ' . (int)($entry_counts->private ?? 0) . '</p>';
 
         echo '<form method="post">';
         wp_nonce_field('aettaec_purge_now');

@@ -41,6 +41,7 @@ final class AETTAEC_Plugin
             'min_submit_seconds' => 3,
             'use_css' => 1,
             'consent_required' => 1,
+            'store_ip_ua' => 0,
             'consent_label' => __('I agree to receive emails.', 'aetta-email-capture'),
             'success_message' => __('Success! Subscription complete.', 'aetta-email-capture'),
             'error_invalid' => __('Invalid submission.', 'aetta-email-capture'),
@@ -57,9 +58,16 @@ final class AETTAEC_Plugin
             'ui_radius' => 12,
             'ui_button_bg' => '#1d2327',
             'ui_button_text' => '#ffffff',
+            'ui_button_hover_bg' => '#3c434a',
             'ui_success_border' => '#00a32a',
             'ui_error_border' => '#d63638',
             'ui_input_height' => 44,
+            'ui_form_bg' => '#ffffff',
+            'ui_text_color' => '#1d2327',
+            'ui_input_bg' => '#ffffff',
+            'ui_font_size' => 14,
+            'ui_max_width' => 420,
+            'ui_layout' => 'stacked',
         ];
 
         return array_merge($default_settings, get_option('aettaec_options', []));

@@ -8,6 +8,25 @@ class AETTAEC_Form
         add_shortcode('aetta_email_capture', [__CLASS__, 'render_shortcode']);
         add_action('admin_post_aettaec_submit', [__CLASS__, 'process_form_submission']);
         add_action('admin_post_nopriv_aettaec_submit', [__CLASS__, 'process_form_submission']);
+        add_action('wp_ajax_aettaec_submit', [__CLASS__, 'process_ajax_submission']);
+        add_action('wp_ajax_nopriv_aettaec_submit', [__CLASS__, 'process_ajax_submission']);
+    }
+
+    public static function process_ajax_submission()
+    {
+        $nonce_value = isset($_POST['aettaec_nonce']) ? sanitize_key(wp_unslash($_POST['aettaec_nonce'])) : '';
+        if (!wp_verify_nonce($nonce_value, 'aettaec_submit')) {
+            wp_send_json_error(['message' => __('Security check failed.', 'aetta-email-capture')], 403);
+        }
+
+        $options = AETTAEC_Plugin::get_plugin_options();
+        $submission_result = self::execute_submission_logic($options, $_POST);
+
+        if ($submission_result === true) {
+            wp_send_json_success(['message' => $options['success_message']]);
+        }
+
+        wp_send_json_error(['message' => $submission_result]);
     }
 
     public static function process_form_submission()
@@ -50,6 +69,7 @@ class AETTAEC_Form
         if ((int)$options['use_css'] === 1) {
             wp_enqueue_style('aettaec-form', AETTAEC_PLUGIN_URL . 'assets/css/form.css', [], AETTAEC_VERSION);
         }
+        wp_enqueue_script('aettaec-form', AETTAEC_PLUGIN_URL . 'assets/js/form.js', [], AETTAEC_VERSION, true);
 
         $css_variables = [
             '--aettaec-border-color:' . $options['ui_border_color'],
@@ -58,29 +78,46 @@ class AETTAEC_Form
             '--aettaec-input-height:' . (int)$options['ui_input_height'] . 'px',
             '--aettaec-button-bg:' . $options['ui_button_bg'],
             '--aettaec-button-text:' . $options['ui_button_text'],
+            '--aettaec-button-hover-bg:' . $options['ui_button_hover_bg'],
             '--aettaec-success-border:' . $options['ui_success_border'],
-            '--aettaec-error-border:' . $options['ui_error_border']
+            '--aettaec-error-border:' . $options['ui_error_border'],
+            '--aettaec-form-bg:' . $options['ui_form_bg'],
+            '--aettaec-text-color:' . $options['ui_text_color'],
+            '--aettaec-input-bg:' . $options['ui_input_bg'],
+            '--aettaec-font-size:' . (int)$options['ui_font_size'] . 'px',
+            '--aettaec-max-width:' . (int)$options['ui_max_width'] . 'px'
         ];
         $style_attr = implode(';', $css_variables);
 
         $html = '';
         if ($is_success) {
-            $html .= '<div class="aettaec-msg aettaec-success" style="' . esc_attr($style_attr) . '"><strong>' . esc_html__('Success!', 'aetta-email-capture') . '</strong> — ' . esc_html($options['success_message']) . '</div>';
+            $html .= '<div class="aettaec-msg aettaec-success" style="' . esc_attr($style_attr) . '"><strong>' . esc_html__('Success!', 'aetta-email-capture') . '</strong> - ' . esc_html($options['success_message']) . '</div>';
         }
         if ($error_msg) {
             $msg = ($error_msg === 'invalid') ? $options['error_invalid'] : urldecode($error_msg);
             $html .= '<div class="aettaec-msg aettaec-error" style="' . esc_attr($style_attr) . '"><strong>' . esc_html__('Error:', 'aetta-email-capture') . '</strong> ' . esc_html($msg) . '</div>';
         }
 
-        $html .= '<form class="aettaec-form" method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="' . esc_attr($style_attr) . '">';
+        $layout_class = ($options['ui_layout'] === 'inline') ? 'aettaec-layout-inline' : 'aettaec-layout-stacked';
+        $current_url = home_url(isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '/');
+
+        $html .= '<form class="aettaec-form ' . $layout_class . '" method="post" action="' . esc_url(admin_url('admin-post.php')) . '" data-ajax="' . esc_url(admin_url('admin-ajax.php')) . '" style="' . esc_attr($style_attr) . '">';
         $html .= wp_nonce_field('aettaec_submit', 'aettaec_nonce', true, false);
         $html .= '<input type="hidden" name="action" value="aettaec_submit">';
+        $html .= '<input type="hidden" name="aettaec_src" value="' . esc_url($current_url) . '">';
+        $html .= '<input type="hidden" name="aettaec_ref" value="">';
 
+        $html .= '<div class="aettaec-fields">';
+        $html .= '<div class="aettaec-field">';
         $html .= '<label for="aettaec_name">' . esc_html($options['name_label']) . '</label>';
         $html .= '<input id="aettaec_name" name="aettaec_name" type="text" required placeholder="' . esc_attr($options['name_placeholder']) . '">';
+        $html .= '</div>';
 
+        $html .= '<div class="aettaec-field">';
         $html .= '<label for="aettaec_email">' . esc_html($options['email_label']) . '</label>';
         $html .= '<input id="aettaec_email" name="aettaec_email" type="email" required placeholder="' . esc_attr($options['email_placeholder']) . '">';
+        $html .= '</div>';
+        $html .= '</div>';
 
         if ((int)$options['consent_required'] === 1) {
             $html .= '<div class="aettaec-consent"><input id="aettaec_consent" name="aettaec_consent" type="checkbox" value="1"><label for="aettaec_consent">' . esc_html($options['consent_label']) . '</label></div>';
@@ -117,6 +154,22 @@ class AETTAEC_Form
         update_post_meta($pid, '_aettaec_name', $name);
         update_post_meta($pid, '_aettaec_email', $email);
         update_post_meta($pid, '_aettaec_consent', !empty($data['aettaec_consent']) ? 1 : 0);
+        update_post_meta($pid, '_aettaec_created_gmt', gmdate('Y-m-d H:i:s'));
+
+        $source_url = isset($data['aettaec_src']) ? esc_url_raw(wp_unslash($data['aettaec_src'])) : '';
+        if ($source_url === '') $source_url = esc_url_raw((string)wp_get_referer());
+        if ($source_url !== '') update_post_meta($pid, '_aettaec_source_url', $source_url);
+
+        $source_ref = isset($data['aettaec_ref']) ? esc_url_raw(wp_unslash($data['aettaec_ref'])) : '';
+        if ($source_ref !== '') update_post_meta($pid, '_aettaec_source_ref', $source_ref);
+
+        if ((int)$options['store_ip_ua'] === 1) {
+            $ip_address = isset($_SERVER['REMOTE_ADDR']) ? filter_var(wp_unslash($_SERVER['REMOTE_ADDR']), FILTER_VALIDATE_IP) : false;
+            if ($ip_address) update_post_meta($pid, '_aettaec_ip', $ip_address);
+
+            $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? substr(sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])), 0, 255) : '';
+            if ($user_agent !== '') update_post_meta($pid, '_aettaec_ua', $user_agent);
+        }
 
         return true;
     }
